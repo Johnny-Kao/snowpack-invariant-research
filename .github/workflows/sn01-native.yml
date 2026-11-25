@@ -1,0 +1,41 @@
+name: SN-01 native weighted-average probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned MeteoIO
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake numdiff
+          git clone --no-checkout https://code.wsl.ch/snow-models/meteoio.git /tmp/meteoio
+          git -C /tmp/meteoio checkout --detach 857dd8055861305a20b8bde29914dee7e4c69f2f
+          cd /tmp/meteoio
+          cmake -S . -B . -DDEST=safe -DVERSION_FROM_GIT=ON -DBUILD_TESTING=OFF -DUSE_LTO_OPTIMIZATIONS=OFF -DINSTALL_DOC=OFF -DCPACK_BUNDLE_ALL=ON -DCPACK_GENERATOR=DEB
+          cmake --build . -j2
+          cpack
+          sudo dpkg -i MeteoIO-*.deb
+      - name: Build unmodified Snowpack library
+        run: |
+          cmake -S . -B build -DDEST=safe -DVERSION_FROM_GIT=OFF -DBUILD_TESTING=ON -DMETEOIO_INCLUDE_DIR=/usr/include -DMETEOIO_LIBRARY=/usr/lib/libmeteoio.so
+          cmake --build build --target snowpack -j2
+          g++ -std=c++17 -I. research/sn01/native_average.cc -Llib -Wl,-rpath,"$PWD/lib" -lsnowpack -lmeteoio -o /tmp/sn01
+      - name: Baseline expected RED
+        run: |
+          set +e
+          /tmp/sn01
+          rc=$?
+          set -e
+          test "$rc" -eq 5
+      - name: Candidate GREEN
+        run: |
+          python3 research/sn01/apply_candidate.py
+          cmake --build build --target snowpack -j2
+          /tmp/sn01
+      - name: List native CTest inventory
+        run: ctest --test-dir build -N
