@@ -1,0 +1,527 @@
+/*
+ *  SNOWPACK stand-alone
+ *
+ *  Copyright WSL Institute for Snow and Avalanche Research SLF, DAVOS, SWITZERLAND
+*/
+/*  This file is part of Snowpack.
+    Snowpack is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Snowpack is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Snowpack.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#include <snowpack/SnowpackConfig.h>
+
+#include <regex>
+
+using namespace mio;
+using namespace std;
+
+/************************************************************
+ * static section                                           *
+ ************************************************************/
+map<string,string> SnowpackConfig::snowpackConfig;
+map<string,string> SnowpackConfig::advancedConfig;
+map<string,string> SnowpackConfig::inputConfig;
+map<string,string> SnowpackConfig::outputConfig;
+map<string,string> SnowpackConfig::TechSnowConfig;
+
+const bool SnowpackConfig::__init = SnowpackConfig::initStaticData();
+
+bool SnowpackConfig::initStaticData()
+{
+	//[Snowpack] section
+	advancedConfig["SOIL_FLUX"] = "false";
+
+	//[SnowpackAdvanced] section
+	advancedConfig["ADVECTIVE_HEAT"] = "false";
+	advancedConfig["ALLOW_ADAPTIVE_TIMESTEPPING"] = "true";
+	advancedConfig["ALPINE3D"] = "false";
+	advancedConfig["ALPINE3D_PTS"] = "false";
+	advancedConfig["DETECT_GRASS"] = "false";
+	advancedConfig["ALBEDO_FIXEDVALUE"] = "-999.";
+	advancedConfig["ALBEDO_PARAMETERIZATION"] = "LEHNING_2";
+	advancedConfig["ALBEDO_AVERAGE_SCHMUCKI"] = "ALL_DATA";
+	advancedConfig["ALBEDO_AGING"] = "true";
+	advancedConfig["ALLOW_FREEZING_RAIN"] = "true";
+	advancedConfig["COUPLEDPHASECHANGES"] = "false";
+	advancedConfig["ENABLE_VAPOUR_TRANSPORT"] = "false";
+	advancedConfig["ENHANCED_WIND_SLAB"] = "false";
+	advancedConfig["FIXED_POSITIONS"] = "";
+	advancedConfig["FORCE_RH_WATER"] = "true";
+	advancedConfig["FORCE_ADD_SNOWFALL"] = "false";
+	advancedConfig["HARDNESS_PARAMETERIZATION"] = "MONTI";
+	advancedConfig["HEIGHT_NEW_ELEM"] = "0.02";
+	advancedConfig["HN_DENSITY"] = "PARAMETERIZED";
+	advancedConfig["HN_DENSITY_FIXEDVALUE"] = "100.";
+	advancedConfig["HN_DENSITY_PARAMETERIZATION"] = "LEHNING_NEW";
+	advancedConfig["DENSITY_REDEPOSIT"] = "EVENT"; // The density to use in snowpack::redepositSnow. EVENT, PARAMETERIZED, or a value from hn_density_parameterization.
+	advancedConfig["WIND_SLAB_DENSITY"] = "77.";  // Predefined snow density (kg m-3) used to convert mass flux to drift index deposition depth (cm/24h)
+	advancedConfig["NEW_SNOW_DD_PARAMETERIZATION"] = "DD_STEP_WIND";
+	advancedConfig["NEW_SNOW_SP_PARAMETERIZATION"] = "SP_STEP_WIND";
+	advancedConfig["HOAR_DENSITY_BURIED"] = "125.";
+	advancedConfig["HOAR_DENSITY_SURF"] = "100.";
+	advancedConfig["HOAR_MIN_SIZE_BURIED"] = "2.";
+	advancedConfig["HOAR_MIN_SIZE_SURF"] = "0.5";
+	advancedConfig["HOAR_THRESH_TA"] = "1.2";
+	advancedConfig["HOAR_THRESH_RH"] = "0.97";
+	advancedConfig["HOAR_THRESH_VW"] = "3.5";
+	advancedConfig["JAM"] = "false";
+	advancedConfig["COMBINE_ELEMENTS"] = "true";
+	advancedConfig["REDUCE_N_ELEMENTS"] = "false";
+	advancedConfig["MASS_BALANCE"] = "false";
+	advancedConfig["MAX_NUMBER_MEAS_TEMPERATURES"] = "5";
+	advancedConfig["MEAS_INCOMING_LONGWAVE"] = "true";
+	advancedConfig["METAMORPHISM_MODEL"] = "DEFAULT";
+	advancedConfig["MELT_CRUST_RELAXATION_SP_THRESHOLD"] = "0."; //(0,1) Determines how fast melt crusts disappear through faceting. The higher, the faster crusts disappear. Set to 0 for original behaviour, i.e. the marker never disappears and faceting is slower.
+	advancedConfig["MIN_DEPTH_SUBSURF"] = "0.07";
+	advancedConfig["MINIMUM_L_ELEMENT"] = "0.0025";
+	advancedConfig["NEW_SNOW_GRAIN_SIZE"] = "0.3";
+	advancedConfig["NUMBER_FIXED_RATES"] = "0";
+	advancedConfig["NUMBER_SLOPES"] = "1";
+	advancedConfig["PERP_TO_SLOPE"] = "false";
+	advancedConfig["PLASTIC"] = "false";
+	advancedConfig["PREVAILING_WIND_DIR"] = "0.";
+	advancedConfig["RESEARCH"] = "true";
+	advancedConfig["SNOW_ALBEDO"] = "PARAMETERIZED";
+	advancedConfig["SNOW_EROSION"] = "NONE";
+	advancedConfig["SNOW_REDISTRIBUTION"] = "NONE";
+	advancedConfig["SALTATION_MODEL"] = "SORENSEN";
+	advancedConfig["STRENGTH_MODEL"] = "DEFAULT";
+	advancedConfig["SW_ABSORPTION_SCHEME"] = "MULTI_BAND";
+	advancedConfig["FORCE_SW_MODE"] = "false";
+	advancedConfig["TEMP_INDEX_DEGREE_DAY"] = "0."; //to replace the EB computation during melt phases by a dday model
+	advancedConfig["TEMP_INDEX_SWR_FACTOR"] = "0."; //to replace the EB computation during melt phases by a dday model
+	advancedConfig["THRESH_RAIN"] = "1.2";
+	advancedConfig["THRESH_RH"] = "0.5";
+	advancedConfig["THRESH_DTEMP_AIR_SNOW"] = "3.0";
+	advancedConfig["T_CRAZY_MAX"] = "340.";
+	advancedConfig["T_CRAZY_MIN"] = "210.";
+	advancedConfig["VARIANT"] = "DEFAULT";
+	advancedConfig["VISCOSITY_MODEL"] = "DEFAULT";
+	advancedConfig["WATER_LAYER"] = "false";
+	advancedConfig["WATERTRANSPORTMODEL_SNOW"]="BUCKET";
+	advancedConfig["WATERTRANSPORTMODEL_SOIL"]="BUCKET";
+	advancedConfig["LB_COND_WATERFLUX"]="FREEDRAINAGE";				// Only for use with RE.
+	advancedConfig["AVG_METHOD_HYDRAULIC_CONDUCTIVITY"]="ARITHMETICMEAN";		// Only for use with RE.
+	advancedConfig["HYDRAULIC_CONDUCTIVITY_FROZEN_SOIL"]="IGNORE";			// Only for use with RE.
+	advancedConfig["PREF_FLOW" ] = "false";						// Only for use with RE.
+	advancedConfig["PREF_FLOW_PARAM_TH"] = "0.1";					// Only for use with RE and preferential flow.
+	advancedConfig["PREF_FLOW_PARAM_N"] = "0.0";					// Only for use with RE and preferential flow.
+	advancedConfig["PREF_FLOW_PARAM_HETEROGENEITY_FACTOR"] = "1.0";			// Only for use with RE and preferential flow.
+	advancedConfig["PREF_FLOW_RAIN_INPUT_DOMAIN" ] = "MATRIX";			// Only for use with RE.
+	advancedConfig["ICE_RESERVOIR" ] = "false";					// Only for use with RE and preferential flow.
+	advancedConfig["REQ_INITIALIZE_SOIL" ] = "false";				// Only for use with RE.
+	advancedConfig["ADJUST_HEIGHT_OF_METEO_VALUES"] = "true";
+	advancedConfig["ADJUST_HEIGHT_OF_WIND_VALUE"] = "true";
+	advancedConfig["WIND_SCALING_FACTOR"] = "1.0";
+	advancedConfig["ADVECTIVE_HEAT"] = "false";
+	advancedConfig["HEAT_BEGIN"] = "0.0";
+	advancedConfig["HEAT_END"] = "0.0";
+	advancedConfig["TWO_LAYER_CANOPY"] = "true";
+	advancedConfig["CANOPY_HEAT_MASS"] = "true";
+	advancedConfig["CANOPY_TRANSMISSION"] = "true";
+	advancedConfig["FORESTFLOOR_ALB"] = "true";
+	advancedConfig["SOIL_EVAP_MODEL"] = "EVAP_RESISTANCE";
+	advancedConfig["SOIL_THERMAL_CONDUCTIVITY"] = "COSENZA2003";
+
+	//temporary keys for Stability until we decide for a permanent solution
+	advancedConfig["MULTI_LAYER_SK38"] = "false";
+	advancedConfig["LEGACY_STABILITY_BUG"] = "false"; //Keep it until we have re-calibrated all parametrizations that might be impacted
+
+	// followings are for input
+	advancedConfig["RIME_INDEX"] = "false";
+	advancedConfig["NEWSNOW_LWC"] = "false";
+	advancedConfig["READ_DSM"] = "false";
+
+	//[Input] section
+	inputConfig["METEOPATH"] = "./input";
+	inputConfig["NUMBER_OF_SOLUTES"] = "0";
+	inputConfig["SNOW"] = "SMET";
+	inputConfig["SOLUTE_NAMES"] = "NITRATE";
+
+	//[Output] section
+	outputConfig["AGGREGATE_PRO"] = "false";
+	outputConfig["AGGREGATE_PRF"] = "false";
+	outputConfig["AVGSUM_TIME_SERIES"] = "true";
+	outputConfig["SNOW_DAYS_BETWEEN"] = "365.";
+	outputConfig["CLASSIFY_PROFILE"] = "false";
+	outputConfig["CUMSUM_MASS"] = "false";
+	outputConfig["EXPERIMENT"] = "NO_EXP";
+	outputConfig["FIRST_BACKUP"] = "400.";
+	outputConfig["HARDNESS_IN_NEWTON"] = "false";
+	outputConfig["METEO"] = "SMET";
+	outputConfig["METEOPATH"] = "./output";
+	outputConfig["OUT_CANOPY"] = "false";
+	outputConfig["OUT_HAZ"] = "true";
+	outputConfig["OUT_HEAT"] = "true";
+	outputConfig["OUT_LOAD"] = "false";
+	outputConfig["OUT_LW"] = "true";
+	outputConfig["OUT_MASS"] = "true";
+	outputConfig["OUT_METEO"] = "true";
+	outputConfig["OUT_SOILEB"] = "false";
+	outputConfig["OUT_STAB"] = "true";
+	outputConfig["OUT_SW"] = "true";
+	outputConfig["OUT_T"] = "true";
+	outputConfig["PRECIP_RATES"] = "true";
+	outputConfig["PROF_FORMAT"] = "PRO";
+	outputConfig["PROF_DAYS_BETWEEN"] = "1";
+	outputConfig["PROF_START"] = "0";
+	outputConfig["PROF_ID_OR_MK"] = "ID";
+	outputConfig["PROF_AGE_OR_DATE"] = "AGE";
+	outputConfig["SNOW_WRITE"] = "true";
+	outputConfig["SNOW"] = "SMET";
+	outputConfig["HAZ_WRITE"] = "true";
+	outputConfig["TS_FORMAT"] = "MET";
+	outputConfig["TS_DAYS_BETWEEN"] = "1";
+	outputConfig["TS_START"] = "0";
+	outputConfig["ACDD_WRITE"] = "false";
+	outputConfig["WRITE_PROCESSED_METEO"] = "false";
+
+	TechSnowConfig["SNOW_GROOMING"] = "false";
+	TechSnowConfig["GROOMING_WEEK_START"] = "40";
+	TechSnowConfig["GROOMING_WEEK_END"] = "17";
+	TechSnowConfig["GROOMING_HOUR"] = "21";
+	TechSnowConfig["GROOMING_DEPTH_START"] = "0.4";
+	TechSnowConfig["GROOMING_DEPTH_IMPACT"] = "0.4";
+
+	return true;
+}
+
+/************************************************************
+ * non-static section                                       *
+ ************************************************************/
+
+SnowpackConfig::SnowpackConfig(const mio::Config& i_cfg) : Config(i_cfg),
+                               enforce_measured_snow_heights(false)
+{
+	setDefaults();
+}
+
+SnowpackConfig::SnowpackConfig(const std::string& i_filename) : Config(i_filename),
+                               enforce_measured_snow_heights(false)
+{
+	setDefaults();
+}
+
+void SnowpackConfig::setDefaults()
+{ //BUG we have a problem here: we try to keep the user settings if present. But we can not anymore make the difference between
+// default values and user set values... The whole "if xxx.empty()" does not work anymore!
+	string variant; getValue("VARIANT", "SnowpackAdvanced", variant, IOUtils::nothrow);
+
+	getValue("ENFORCE_MEASURED_SNOW_HEIGHTS", "Snowpack", enforce_measured_snow_heights);
+
+	string albedo_model; getValue("ALBEDO_MODEL", "SnowpackAdvanced", albedo_model, IOUtils::nothrow);
+	string hn_density; getValue("HN_DENSITY", "SnowpackAdvanced", hn_density, IOUtils::nothrow);
+	string hn_density_parameterization; getValue("HN_DENSITY_PARAMETERIZATION", "SnowpackAdvanced", hn_density_parameterization, IOUtils::nothrow);
+	string metamorphism_model; getValue("METAMORPHISM_MODEL", "SnowpackAdvanced", metamorphism_model, IOUtils::nothrow);
+	string strength_model; getValue("STRENGTH_MODEL", "SnowpackAdvanced", strength_model, IOUtils::nothrow);
+	string viscosity_model; getValue("VISCOSITY_MODEL", "SnowpackAdvanced", viscosity_model, IOUtils::nothrow);
+	string watertransportmodel_snow; getValue("WATERTRANSPORTMODEL_SNOW", "SnowpackAdvanced", watertransportmodel_snow, IOUtils::nothrow);
+	string watertransportmodel_soil; getValue("WATERTRANSPORTMODEL_SOIL", "SnowpackAdvanced", watertransportmodel_soil, IOUtils::nothrow);
+	string lb_cond_waterflux; getValue("LB_COND_WATERFLUX", "SnowpackAdvanced", lb_cond_waterflux, IOUtils::nothrow);
+	string s_minimum_l_element; getValue("MINIMUM_L_ELEMENT", "SnowpackAdvanced", s_minimum_l_element, IOUtils::nothrow);
+	string s_height_new_elem; getValue("HEIGHT_NEW_ELEM", "SnowpackAdvanced", s_height_new_elem, IOUtils::nothrow);
+	string dd_model; getValue("NEW_SNOW_DD_PARAMETERIZATION", "SnowpackAdvanced", dd_model, IOUtils::nothrow);
+
+	// If the new snow dendricity parameterization is not set, take the DD_ZWART for ZWART hn_density_parameterization, to remain consistent with legacy SNOWPACK versions
+	if (dd_model.empty() && hn_density_parameterization == "ZWART") addKey("NEW_SNOW_DD_PARAMETERIZATION", "SnowpackAdvanced", "DD_ZWART");
+
+	if (s_minimum_l_element.empty()) addKey("MINIMUM_L_ELEMENT", "SnowpackAdvanced", advancedConfig["MINIMUM_L_ELEMENT"]);
+	double minimum_l_element = get("MINIMUM_L_ELEMENT", "SnowpackAdvanced");
+
+	if (enforce_measured_snow_heights) {
+		if(s_height_new_elem.empty()) addKey("HEIGHT_NEW_ELEM", "SnowpackAdvanced", advancedConfig["HEIGHT_NEW_ELEM"]);
+	} else {
+		if(s_height_new_elem.empty()) {
+			stringstream ss;
+			const double tmp = 2. * minimum_l_element;
+			ss << tmp;
+			addKey("HEIGHT_NEW_ELEM", "SnowpackAdvanced", ss.str());
+		}
+	}
+
+
+	if ((variant.empty()) || (variant == "DEFAULT")) {
+		// Use default settings
+	} else if (variant == "JAPAN") {
+		if (albedo_model.empty()) addKey("ALBEDO_MODEL", "SnowpackAdvanced", "NIED");
+		if (hn_density_parameterization.empty()) addKey("HN_DENSITY_PARAMETERIZATION", "SnowpackAdvanced", "NIED");
+		if (metamorphism_model.empty()) addKey("METAMORPHISM_MODEL", "SnowpackAdvanced", "NIED");
+		if (strength_model.empty()) addKey("STRENGTH_MODEL", "SnowpackAdvanced", "NIED");
+		if (viscosity_model.empty()) addKey("VISCOSITY_MODEL", "SnowpackAdvanced", "KOJIMA");
+		if (watertransportmodel_snow.empty()) addKey("WATERTRANSPORTMODEL_SNOW", "SnowpackAdvanced", "NIED");
+		if (watertransportmodel_soil.empty()) addKey("WATERTRANSPORTMODEL_SOIL", "SnowpackAdvanced", "NIED");
+
+	} else if (variant == "ANTARCTICA" || variant == "POLAR") {
+		addKey("ENHANCED_WIND_SLAB", "SnowpackAdvanced", "TRUE");
+		if (variant == "ANTARCTICA") {
+			if (hn_density.empty()) addKey("HN_DENSITY", "SnowpackAdvanced", "EVENT");
+
+			addKey("MINIMUM_L_ELEMENT", "SnowpackAdvanced", "0.0001"); //Minimum element length (m)
+			minimum_l_element = get("MINIMUM_L_ELEMENT", "SnowpackAdvanced");
+
+			if ( !enforce_measured_snow_heights) {
+				stringstream ss;
+				const double tmp = 1.1 * minimum_l_element;
+				ss << tmp;
+				addKey("HEIGHT_NEW_ELEM", "SnowpackAdvanced", ss.str());
+			}
+		}
+		string hoar_density_buried; getValue("HOAR_DENSITY_BURIED", "SnowpackAdvanced", hoar_density_buried, IOUtils::nothrow);
+		if (hoar_density_buried.empty()) addKey("HOAR_DENSITY_BURIED", "SnowpackAdvanced", "200.0");
+
+		string force_rh_water; getValue("FORCE_RH_WATER", "SnowpackAdvanced", force_rh_water, IOUtils::nothrow);
+		if (force_rh_water.empty()) addKey("FORCE_RH_WATER", "SnowpackAdvanced", "false");
+
+		string thresh_rh; getValue("THRESH_RH", "SnowpackAdvanced", thresh_rh, IOUtils::nothrow);
+		if (thresh_rh.empty()) addKey("THRESH_RH", "SnowpackAdvanced", "0.7");
+
+		addKey("MIN_DEPTH_SUBSURF", "SnowpackAdvanced", "0.");
+		string t_crazy_min; getValue("T_CRAZY_MIN", "SnowpackAdvanced", t_crazy_min, IOUtils::nothrow);
+		string t_crazy_max; getValue("T_CRAZY_MAX", "SnowpackAdvanced", t_crazy_max, IOUtils::nothrow);
+		// If not specified in the ini file, set "polar" limits on the crazy temperatures
+		if (t_crazy_min.empty()) addKey("T_CRAZY_MIN", "SnowpackAdvanced", "165.");
+		if (t_crazy_max.empty()) addKey("T_CRAZY_MAX", "SnowpackAdvanced", "300.");
+		addKey("NEW_SNOW_GRAIN_SIZE", "SnowpackAdvanced", "0.2");
+
+	} else if (variant == "CALIBRATION") {
+		if (hn_density_parameterization.empty()) addKey("HN_DENSITY_PARAMETERIZATION", "SnowpackAdvanced", "ZWART");
+		if (dd_model.empty()) addKey("NEW_SNOW_DD_PARAMETERIZATION", "SnowpackAdvanced", "DD_ZWART");
+		if (viscosity_model.empty()) addKey("VISCOSITY_MODEL", "SnowpackAdvanced", "CALIBRATION");
+
+		string fixed_positions; getValue("FIXED_POSITIONS", "SnowpackAdvanced", fixed_positions, IOUtils::nothrow);
+		if (fixed_positions.empty()) addKey("FIXED_POSITIONS", "SnowpackAdvanced", "5");
+		string number_fixed_rates; getValue("NUMBER_FIXED_RATES", "SnowpackAdvanced", number_fixed_rates, IOUtils::nothrow);
+		if (number_fixed_rates.empty()) addKey("NUMBER_FIXED_RATES", "SnowpackAdvanced", "0");
+		string max_number_meas_temperatures;
+		getValue("MAX_NUMBER_MEAS_TEMPERATURES", "SnowpackAdvanced", max_number_meas_temperatures, IOUtils::nothrow);
+		if (max_number_meas_temperatures.empty()) addKey("MAX_NUMBER_MEAS_TEMPERATURES", "SnowpackAdvanced", "5");
+		string min_depth_subsurf; getValue("MIN_DEPTH_SUBSURF", "SnowpackAdvanced", min_depth_subsurf, IOUtils::nothrow);
+		if (min_depth_subsurf.empty()) addKey("MIN_DEPTH_SUBSURF", "SnowpackAdvanced", "0.0");
+	} else if (variant == "SEAICE") {
+		// Initializations for sea ice
+		if (lb_cond_waterflux.empty()) addKey("LB_COND_WATERFLUX", "SnowpackAdvanced", "SEAICEFLOODING");
+	} else {
+		throw UnknownValueException("Unknown variant " + variant, AT);
+	}
+
+	/* For all parameters not set by the user or by the initialization above, the default values apply
+	 * That is, loop through advancedConfig (then inputConfig & outputConfig) and check whether user has set
+	 * the parameter in the corresponding section, if not add default value
+	 */
+	for(map<string,string>::const_iterator it = snowpackConfig.begin(); it != snowpackConfig.end(); ++it) {
+		//[Snowpack] section
+		string value; getValue(it->first, "Snowpack", value, IOUtils::nothrow);
+		if (value.empty()) addKey(it->first, "Snowpack", it->second);
+	}
+
+	for(map<string,string>::const_iterator it = advancedConfig.begin(); it != advancedConfig.end(); ++it) {
+		//[SnowpackAdvanced] section
+		string value; getValue(it->first, "SnowpackAdvanced", value, IOUtils::nothrow);
+		if (value.empty()) addKey(it->first, "SnowpackAdvanced", it->second);
+	}
+
+	for(map<string,string>::const_iterator it = inputConfig.begin(); it != inputConfig.end(); ++it) {
+		//[Input] section
+		string value; getValue(it->first, "Input", value, IOUtils::nothrow);
+		if (value.empty()) addKey(it->first, "Input", it->second);
+	}
+
+	for(map<string,string>::const_iterator it = outputConfig.begin(); it != outputConfig.end(); ++it) {
+		//[Output] section
+		string value; getValue(it->first, "Output", value, IOUtils::nothrow);
+		if (value.empty()) addKey(it->first, "Output", it->second);
+	}
+
+	for(map<string,string>::const_iterator it = TechSnowConfig.begin(); it != TechSnowConfig.end(); ++it) {
+		//[TechSnow] section
+		string value; getValue(it->first, "TechSnow", value, IOUtils::nothrow);
+		if (value.empty()) addKey(it->first, "TechSnow", it->second);
+	}
+
+	/**
+	 * @brief Defines how energy and mass balance are output \n
+	 * - AVGSUM_TIME_SERIES == 1 \n
+	 *   Energy and mass fluxes are averaged and cumulated over TS_DAYS_BETWEEN, respectively. \n
+	 *   Otherwise, instantaneous energy fluxes and mass fluxes cumulated over the last computation
+	 *   time step (CALCULATION_STEP_LENGTH) are dumped. \n
+	 *   @note Precipitations and Erosion are always given in rates per TS_DAYS_BETWEEN interval (h-1)
+	 * - CUMSUM_MASS == 1 \n
+	 *   Mass fluxes are cumulated over whole run period.
+	 * - WARNING: In operational mode and if NUMBER_SLOPES > 1, the above two values are always unset!
+	 */
+	const unsigned int nSlopes = get("NUMBER_SLOPES", "SnowpackAdvanced");
+	if (nSlopes > 1) {
+		addKey("AVGSUM_TIME_SERIES", "Output", "false");
+		addKey("CUMSUM_MASS", "Output", "false");
+	}
+
+	/**
+	 * @brief Hazard data interval in units of CALCULATION_STEP_LENGTH \n
+	 * WARNING: In operational mode, this has to result in a 30 min interval!
+	 * It is a matter of consitency. If you change this, a big mess will result!!!
+	 */
+	const double calculation_step_length = get("CALCULATION_STEP_LENGTH", "Snowpack");
+
+	string hazard_steps_between;
+	getValue("HAZARD_STEPS_BETWEEN", "Output", hazard_steps_between, IOUtils::nothrow);
+	if (hazard_steps_between.empty()) {
+		stringstream ss;
+		const int tmp = (int)(30./calculation_step_length + 0.5);
+		ss << tmp;
+		addKey("HAZARD_STEPS_BETWEEN", "Output", ss.str());
+	}
+
+	/**
+	 * @brief Default lower boundary condition for Richards equation solver \n
+	 */
+	if (watertransportmodel_soil == "RICHARDSEQUATION" && lb_cond_waterflux.empty()) addKey("LB_COND_WATERFLUX", "SnowpackAdvanced", "FREEDRAINAGE");
+
+	/**
+	 * @brief Checking the settings for hydraulic conductivity \n
+	 */
+	string tmp_avg_method_K; getValue("AVG_METHOD_HYDRAULIC_CONDUCTIVITY_PREF_FLOW", "SnowpackAdvanced", tmp_avg_method_K, IOUtils::nothrow);
+	if (tmp_avg_method_K.empty()) {
+		// If not explicitly specified, take the default one (i.e., the one for matrix flow)
+		getValue("AVG_METHOD_HYDRAULIC_CONDUCTIVITY", "SnowpackAdvanced", tmp_avg_method_K);
+		addKey("AVG_METHOD_HYDRAULIC_CONDUCTIVITY_PREF_FLOW", "SnowpackAdvanced", tmp_avg_method_K);
+	}
+}
+
+
+/**
+ * @brief Check the consistency of some keys when Snowpack is run standalone.
+ * @details When running Snowpack standalone, we know better what to expect and so we can check that the configuration
+ * makes sense and warn if user if not. For example, that liquid precipitation re-accumulation is properly done.
+ * @param[in] mode Snowpack runnning mode (operational or research)
+ */
+void SnowpackConfig::checkStandaloneKeys(const std::string& mode)
+{
+	const std::string tst_sw_mode = get("SW_MODE", "Snowpack"); // Test settings for SW_MODE
+	if (tst_sw_mode == "BOTH") { //HACK: this is only for INP!
+		// Make sure there is not only one of ISWR and RSWR available
+		bool iswr_inp=true, rswr_inp = true;
+		getValue("ISWR_INP","Input",iswr_inp,IOUtils::nothrow);
+		getValue("RSWR_INP","Input",rswr_inp,IOUtils::nothrow);
+		if (!(iswr_inp && rswr_inp)) {
+			cerr << "[E] SW_MODE = " << tst_sw_mode << ": Please set both ISWR_INP and RSWR_INP to true in [Input]-section of io.ini!\n";
+			exit(1);
+		}
+	}
+
+	//warn the user if the precipitation miss proper re-accumulation
+	const bool HS_driven = get("ENFORCE_MEASURED_SNOW_HEIGHTS", "Snowpack");
+	if (mode != "OPERATIONAL" && !HS_driven) {
+		int psum_resampling_index = IOUtils::inodata;
+		const std::vector<std::pair<std::string, std::string>> vecAlgos( getValues("PSUM::RESAMPLE", "Interpolations1D") );
+		for (const auto &key : vecAlgos) {
+			if (IOUtils::strToUpper(key.second) == "ACCUMULATE") {
+				static std::regex pattern ("PSUM::RESAMPLE(\\d+)$", std::regex::icase);
+				std::smatch match;
+				if (std::regex_search(key.first, match, pattern)) { // first is the original key
+					psum_resampling_index = std::stoi(match[1]);
+					break;
+				} else {
+					throw IOException("ACCUMULATE key " + key.first + " does not contain a valid index; I.e. it does not match the pattern PARAM::resample#",AT);
+				}
+			}
+		}
+
+		if (psum_resampling_index == IOUtils::nodata) {
+			std::cerr << "[W] The precipitation should be re-accumulated over CALCULATION_STEP_LENGTH, not doing it is most probably an error!\n";
+		} else {
+			const double psum_accumulate = get("PSUM::arg"+std::to_string(psum_resampling_index)+"::period", "Interpolations1D");
+			const double sn_step_length = get("CALCULATION_STEP_LENGTH", "Snowpack");
+			if (sn_step_length*60. != psum_accumulate)
+				std::cerr << "[W] The precipitation should be re-accumulated over CALCULATION_STEP_LENGTH (currently, over " <<  psum_accumulate << "s)\n";
+		}
+	}
+
+	const bool detect_grass = get("DETECT_GRASS", "SnowpackAdvanced");
+	if (detect_grass && !HS_driven) {
+		throw mio::IOException("[E] DETECT_GRASS is TRUE while ENFORCE_MEASURED_SNOW_HEIGHTS is FALSE. Cannot continue simulation, because snow height is used to detect grass.", AT);
+	}
+}
+
+
+/**
+ * @brief Add some keys when Snowpack is run standalone, based on some other keys.
+ * @details When running Snowpack standalone, we know better what to expect and so we can enforce some configuration
+ * keys that will be necessary. For example, computing the necessary averages in order to run the DETECT_GRASS filter. Or
+ * to properly filter the forcings when running in polar configuration.
+ * @param[in] mode Snowpack runnning mode (operational or research)
+ */
+void SnowpackConfig::addStandaloneKeys(const std::string& mode)
+{
+	// Add keys to perform running mean in Antarctic variant
+	const std::string variant = get("VARIANT", "SnowpackAdvanced");
+	if (variant == "ANTARCTICA" || variant == "POLAR") {
+		addKey("*::edit999", "InputEditing", "COPY");
+		addKey("*::arg999::dest", "InputEditing", "VW_AVG");
+		addKey("*::arg999::src", "InputEditing", "VW");
+		addKey("*::edit998", "InputEditing", "COPY");
+		addKey("*::arg998::dest", "InputEditing", "RH_AVG");
+		addKey("*::arg998::src", "InputEditing", "RH");
+
+		addKey("VW_AVG::filter1", "Filters", "AGGREGATE");
+		addKey("VW_AVG::arg1::type", "Filters", "MEAN");
+		addKey("VW_AVG::arg1::soft", "Filters", "true");
+		addKey("VW_AVG::arg1::min_pts", "Filters", "101");
+		addKey("VW_AVG::arg1::min_span", "Filters", "360000");
+		addKey("RH_AVG::filter1", "Filters", "AGGREGATE");
+		addKey("RH_AVG::arg1::type", "Filters", "MEAN");
+		addKey("RH_AVG::arg1::soft", "Filters", "true");
+		addKey("RH_AVG::arg1::min_pts", "Filters", "101");
+		addKey("RH_AVG::arg1::min_span", "Filters", "360000");
+	}
+
+	const bool useCanopyModel = get("CANOPY", "Snowpack");
+	if (mode == "OPERATIONAL") {
+		addKey("RESEARCH", "SnowpackAdvanced", "false");
+		addKey("AVGSUM_TIME_SERIES", "Output", "false");
+		if (useCanopyModel) {
+			throw mio::IOException("Please don't set CANOPY to 1 in OPERATIONAL mode", AT);
+		}
+	}
+
+	const bool detect_grass = get("DETECT_GRASS", "SnowpackAdvanced");
+	if (detect_grass) {
+		// we need various average values of tss and hs, all for "past" windows (left)
+		// Require at least one value per 3 hours
+		addKey("*::edit899", "InputEditing", "COPY");
+		addKey("*::arg899::dest", "InputEditing", "TSS_A24H");
+		addKey("*::arg899::src", "InputEditing", "TSS");
+		addKey("TSS_A24H::filter1", "Filters", "AGGREGATE");
+		addKey("TSS_A24H::arg1::type", "Filters", "MEAN");
+		addKey("TSS_A24H::arg1::centering", "Filters", "left");
+		addKey("TSS_A24H::arg1::min_pts", "Filters", "48"); //TODO change # data required to 4
+		addKey("TSS_A24H::arg1::min_span", "Filters", "86340");
+
+		addKey("*::edit890", "InputEditing", "COPY");
+		addKey("*::arg890::dest", "InputEditing", "TSS_A12H");
+		addKey("*::arg890::src", "InputEditing", "TSS");
+		addKey("TSS_A12H::filter1", "Filters", "AGGREGATE");
+		addKey("TSS_A12H::arg1::type", "Filters", "MEAN");
+		addKey("TSS_A12H::arg1::centering", "Filters", "left");
+		addKey("TSS_A12H::arg1::min_pts", "Filters", "24"); //TODO change # data required to 2
+		addKey("TSS_A12H::arg1::min_span", "Filters", "43140");
+
+		addKey("*::edit880", "InputEditing", "COPY");
+		addKey("*::arg880::dest", "InputEditing", "HS_A3H");
+		addKey("*::arg880::src", "InputEditing", "HS");
+		addKey("HS_A3H::filter1", "Filters", "AGGREGATE");
+		addKey("HS_A3H::arg1::type", "Filters", "MEAN");
+		addKey("HS_A3H::arg1::centering", "Filters", "left");
+		addKey("HS_A3H::arg1::min_pts", "Filters", "6"); //TODO change # data required to 1
+		addKey("HS_A3H::arg1::min_span", "Filters", "10740");
+	}
+}

@@ -1,0 +1,82 @@
+#SPDX-License-Identifier: LGPL-3.0-or-later
+INCLUDE_DIRECTORIES("${PROJECT_SOURCE_DIR}/")
+
+INCLUDE("${PROJECT_SOURCE_DIR}/snowpack/plugins/CMakeLists.txt")
+INCLUDE("${PROJECT_SOURCE_DIR}/snowpack/snowpackCore/CMakeLists.txt")
+
+###########################################################
+#Set the source files
+SET(snowpacklib_sources
+	DataClasses.cc
+	${plugins_sources}
+	${core_sources}
+	vanGenuchten.cc
+	SnowpackConfig.cc
+	Meteo.cc
+	Saltation.cc
+	Laws_sn.cc
+	Utils.cc
+	StabilityAlgorithms.cc
+	Stability.cc
+	Hazard.cc
+	SnowDrift.cc
+	TechnicalSnow.cc
+)
+
+###########################################################
+#Additional dependencies and options
+FIND_PACKAGE(MeteoIO REQUIRED)
+INCLUDE_DIRECTORIES(${METEOIO_INCLUDE_DIR})
+LIST(APPEND EXTRA_LIBS ${METEOIO_LIBRARIES})
+
+IF(ENABLE_LAPACK)
+	FIND_PACKAGE(Lapack REQUIRED)
+	LINK_DIRECTORIES(${Lapack_LIBRARIES})
+	LINK_DIRECTORIES(${Blas_LIBRARIES})
+	LIST(APPEND EXTRA_LIBS ${Lapack_LIBRARIES} ${Blas_LIBRARIES})
+ENDIF(ENABLE_LAPACK)
+
+###########################################################
+#set compiling targets
+IF(BUILD_SHARED_LIBS)
+	SET(SHAREDNAME ${PROJECT_NAME})
+	ADD_LIBRARY(${SHAREDNAME} ${snowpacklib_sources})
+	TARGET_LINK_LIBRARIES(${SHAREDNAME} ${plugin_libs} ${EXTRA_LIBS})
+	SET_TARGET_PROPERTIES(${SHAREDNAME} PROPERTIES
+		MACOSX_RPATH TRUE
+		PREFIX "${LIBPREFIX}"
+		LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/lib"
+		ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/lib"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/lib"
+		CLEAN_DIRECT_OUTPUT 1
+		VERSION "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
+		SOVERSION "${VERSION_MAJOR}"
+	)
+	INSTALL(TARGETS ${SHAREDNAME}
+		RUNTIME DESTINATION ${EXE_DEST} COMPONENT libraries
+		LIBRARY DESTINATION ${LIB_DEST} COMPONENT libraries
+		ARCHIVE DESTINATION ${LIB_DEST} COMPONENT libraries
+	)
+ENDIF(BUILD_SHARED_LIBS)
+
+#static library. Please keep in mind that for Windows, a dll is a runtime
+IF(BUILD_STATIC_LIBS)
+	SET(STATICNAME ${PROJECT_NAME}_STATIC)
+	SET(STATICLIBNAME ${PROJECT_NAME})
+	ADD_LIBRARY(${STATICNAME} STATIC ${snowpacklib_sources})
+	TARGET_LINK_LIBRARIES(${STATICNAME} ${plugin_libs} ${EXTRA_LIBS})
+	SET_TARGET_PROPERTIES(${STATICNAME} PROPERTIES
+		MACOSX_RPATH TRUE
+		PREFIX "${LIBPREFIX}"
+		LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/lib"
+		ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/lib"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/lib"
+		CLEAN_DIRECT_OUTPUT 1
+		OUTPUT_NAME ${STATICLIBNAME}
+	)
+	INSTALL(TARGETS ${STATICNAME}
+		RUNTIME DESTINATION ${EXE_DEST} COMPONENT libraries
+		LIBRARY DESTINATION ${LIB_DEST} COMPONENT libraries
+		ARCHIVE DESTINATION ${LIB_DEST} COMPONENT libraries
+	)
+ENDIF(BUILD_STATIC_LIBS)

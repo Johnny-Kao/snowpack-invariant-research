@@ -1,0 +1,406 @@
+/*
+ *  SNOWPACK stand-alone
+ *
+ *  Copyright WSL Institute for Snow and Avalanche Research SLF, DAVOS, SWITZERLAND
+*/
+/*  This file is part of Snowpack.
+    Snowpack is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Snowpack is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Snowpack.  If not, see <http://www.gnu.org/licenses/>.
+*/
+/**
+ * @file Meteo.cc
+ * @author Michael Lehning and others
+ * @brief Computes missing meteorological information such as friction velocity and roughness length
+ * - 29.10.2002: Michael Lehning implements Micromet()
+ * - 15.03.2005: Andy and Michi implement stability correction for turbulent fluxes in the hope
+ *               that this will also improve the little bit too strong melting of the version 8.1
+ */
+#include <meteoio/MeteoIO.h>
+using namespace mio;
+
+#include <snowpack/Meteo.h>
+#include <snowpack/Constants.h>
+#include <snowpack/Laws_sn.h>
+#include <snowpack/Utils.h>
+
+/************************************************************
+* non-static section                                       *
+************************************************************/
+
+Meteo::Meteo(const SnowpackConfig& cfg)
+       : canopy(cfg),
+         roughness_length_dflt(cfg.get("ROUGHNESS_LENGTH", "Snowpack")),
+         height_of_wind_value(cfg.get("HEIGHT_OF_WIND_VALUE", "Snowpack")),
+         stability(MO_HOLTSLAG),
+         research_mode(cfg.get("RESEARCH", "SnowpackAdvanced")),
+         useCanopyModel(cfg.get("CANOPY", "Snowpack")),
+         adjust_height_of_wind_value(cfg.get("ADJUST_HEIGHT_OF_WIND_VALUE", "SnowpackAdvanced")),
+		 legacy_stability_bug(cfg.get("LEGACY_STABILITY_BUG", "SnowpackAdvanced"))
+{
+	const std::string stability_model = cfg.get("ATMOSPHERIC_STABILITY", "Snowpack");
+	stability = getStability(stability_model);
+}
+
+/**
+ * @brief Parse the given string an return the matching atmospheric stability algorithm
+ * @param[in] stability_model Atmospheric stability model specification
+ * @return Stability model
+ */
+Meteo::ATM_STABILITY Meteo::getStability(const std::string& stability_model)
+{
+	if (stability_model=="RICHARDSON")
+		return RICHARDSON; //Simplified Richardson number stability correction
+	else if (stability_model=="NEUTRAL")
+		return NEUTRAL; //Assume neutral stratification. Should be used with BC_CHANGE=1, i.e., Dirichlet bc but also recommended with Neumann b.c., i.e., BC_CHANGE=0
+	else if (stability_model=="MO_MICHLMAYR")
+		return MO_MICHLMAYR; //Standard MO iteration with Paulson and Stearns & Weidner (can be used with BC_CHANGE=0)
+	else if (stability_model=="MO_STEARNS")
+		return MO_STEARNS;
+	else if (stability_model=="MO_HOLTSLAG")
+		return MO_HOLTSLAG; //should be much better during melt periods than MICHLMAYR_MO
+	else if (stability_model=="MO_LOG_LINEAR")
+		return MO_LOG_LINEAR;
+	else if (stability_model=="MO_SCHLOEGL_UNI")
+		return MO_SCHLOEGL_UNI;
+	else if (stability_model=="MO_SCHLOEGL_MULTI")
+		return MO_SCHLOEGL_MULTI;
+	else if (stability_model=="MO_SCHLOEGL_MULTI_OFFSET")
+		return MO_SCHLOEGL_MULTI_OFFSET;
+	else if (stability_model=="MONIN_OBUKHOV") //HACK: temporary
+		throw InvalidArgumentException("Atmospheric stability model \""+stability_model+"\" is now called 'MO_MICHLMAYR'", AT);
+	else if (stability_model=="NEUTRAL_MO") //HACK: temporary
+		throw InvalidArgumentException("Atmospheric stability model \""+stability_model+"\" is now called 'NEUTRAL'", AT);
+	else
+		throw InvalidArgumentException("Atmospheric stability model \""+stability_model+"\" is not supported!", AT);
+}
+
+/**
+ * @brief Set the atmospheric stability to a given value
+ * @param i_stability Stability model (see possible values in constructor)
+ */
+void Meteo::setStability(const Meteo::ATM_STABILITY& i_stability)
+{
+	stability = i_stability;
+}
+
+/**
+ * @brief Get the atmospheric stability
+ * @return Stability model (see possible values in constructor)
+ */
+Meteo::ATM_STABILITY Meteo::getStability() const
+{
+	return stability;
+}
+
+/**
+ * @brief Richardson stability correction.
+ * @param ta_v Virtual air temperature.
+ * @param t_surf_v Virtual surface temperature.
+ * @param zref Reference height.
+ * @param vw Wind speed.
+ * @param z_ratio Ratio of heights.
+ * @param ustar Friction velocity.
+ * @param psi_s Stability correction for scalars.
+ */
+void Meteo::RichardsonStability(const double& ta_v, const double& t_surf_v, const double& zref, const double& vw, double &psi_s, double &psi_m)
+{
+	const double Ri = Constants::g / t_surf_v * (ta_v - t_surf_v) * zref / Optim::pow2(vw);
+
+	if (Ri < 0.) { // unstable
+		const double stab_ratio = Ri;
+		const double dummy = pow((1. - 15. * stab_ratio), 0.25);
+		psi_m = log((0.5 * (1. + dummy*dummy)) * (0.5 * (1. + dummy)) * (0.5 * (1. + dummy)))
+				- 2. * atan(dummy) + 0.5 * Constants::pi;
+		psi_s = 2. * log(0.5 * (1. + dummy*dummy));
+	} else if (Ri < 0.1999) { // stable
+		const double stab_ratio = Ri / (1. - 5. * Ri);
+		psi_m = psi_s = -5. * stab_ratio;
+	} else {
+		const double stab_ratio = Ri / (1. - 5. * 0.1999);
+		psi_m = psi_s = -5. * stab_ratio;
+	}
+}
+
+double Meteo::parametrizeSnowZ0(const SnowStation& Xdata, CurrentMeteo& Mdata) const
+{
+	if (Mdata.sig_5GHz!=IOUtils::nodata) {
+		const double top_LWC = Xdata.averageFromTop(0.3, [](const ElementData& e) { return (e.theta[WATER]+e.theta[WATER_PREF]); });
+		if (top_LWC>0.01) {
+			const double z0 = exp( (Mdata.sig_5GHz + 18.0157) / 3.9510 );
+			return z0;
+		}
+	}
+
+	return roughness_length_dflt;
+}
+
+/**
+ * @brief Monin-Obukhov stability correction.
+ * @param use_stability Stability model to use.
+ * @param ta_v Virtual air temperature.
+ * @param t_surf_v Virtual surface temperature.
+ * @param t_surf Surface temperature.
+ * @param zref Reference height.
+ * @param vw Wind speed.
+ * @param z_ratio Ratio of heights.
+ * @param ustar Friction velocity.
+ * @param psi_s Stability correction for scalars.
+ * @param psi_m Stability correction for momentum.
+ * @param stable Flag fixing the regime for the whole iteration: 1 for stable conditions, -1 for unstable conditions.
+ *               It is decided once from the (iteration-independent) sign of (ta_v - t_surf_v), not re-evaluated from
+ *               stab_ratio, because stab_ratio's denominator (z_ratio - psi_s) can itself change sign as psi_s is
+ *               updated, which would otherwise make the regime flip-flop and prevent convergence.
+ */
+void Meteo::MOStability(const ATM_STABILITY& use_stability, const double& ta_v, const double& t_surf_v, const double& t_surf, const double& zref, const double& vw, const double& z_ratio, const double &ustar, double &psi_s, double &psi_m, const int& stable)
+{
+	if (use_stability == NEUTRAL) { //prevent recomputing ustar, for consistency
+		psi_m = psi_s = 0.;
+		return;
+	}
+
+	const double Tstar = Constants::karman * (t_surf_v - ta_v) / (z_ratio - psi_s);
+	double stab_ratio;
+	stab_ratio = -Constants::karman * zref * Tstar * Constants::g / (t_surf * Optim::pow2(ustar));
+	stab_ratio = std::min(stab_ratio, 10.0); //stability-ratio clamp of 10, corresponding to Holtslag and de Bruin stability range.
+
+	if (stable > 0) { // stable
+			switch(use_stability) {
+			case MO_HOLTSLAG: {
+			// Holtslag and DeBruin (1988) prepared from Ed Andreas
+			psi_m = psi_s = -(0.7 * stab_ratio + 0.75 * (stab_ratio - 14.28)
+			                           * exp(-0.35 * stab_ratio) + 10.71);
+			return;
+			}
+
+			case MO_STEARNS: {
+			// Stearns & Weidner, 1993, eq (9), note ln x^2 in the paper is ln(x^2) not ln^2(x)
+			const double dummy1 = pow((1. + 5. * stab_ratio), 0.25);
+			psi_m = log(Optim::pow2(1. + dummy1)) + log(1. + Optim::pow2(dummy1))
+					- 2. * atan(dummy1) - 4./3. * Optim::pow3(dummy1) + 0.8247;
+			// Stearns & Weidner, 1993, eq (10), note ln x^2 in the paper is ln(x^2) not ln^2(x)
+			const double dummy2 = Optim::pow2(dummy1);
+			psi_s = log(Optim::pow2(1. + dummy2))
+					- 2. * dummy2 - 2./3. * Optim::pow3(dummy2) + 1.2804;
+			return;
+			}
+
+			case MO_MICHLMAYR: { //default, old MO
+			// Stearns & Weidner, 1993 modified by Michlmayr, 2008
+			const double dummy1 = pow((1. + 5. * stab_ratio), 0.25);
+			psi_m = log(1. + dummy1) * log(1. + dummy1) + log(1. + Optim::pow2(dummy1))
+					- 1. * atan(dummy1) - 0.5 * Optim::pow3(dummy1) + 0.8247;
+			const double dummy2 = Optim::pow2(dummy1);
+			psi_s = log(1. + dummy2) * log(1. + dummy2)
+					- 1. * dummy2 - 0.3 * Optim::pow3(dummy2) + 1.2804;
+			return;
+			}
+
+			case MO_LOG_LINEAR: {
+			//log_linear
+			psi_m = psi_s = -5.* stab_ratio;
+			return;
+			}
+
+			case MO_SCHLOEGL_UNI: {
+			//schloegl univariate: bin univariate 2/3 datasets
+			psi_m = -1.62 * stab_ratio;
+			psi_s = -2.96 * stab_ratio;
+			return;
+			}
+
+			case MO_SCHLOEGL_MULTI: {
+			//All multivariate 2/3 without offset
+			psi_m = - 65.35 *(ta_v - t_surf_v)/(0.5 * (ta_v + t_surf_v)) + 0.0017 * zref * Constants::g/pow(vw,2);
+			psi_s = - 813.21 *(ta_v - t_surf_v)/(0.5 *(ta_v + t_surf_v)) - 0.0014 * zref * Constants::g/pow(vw,2);
+			return;
+			}
+
+			case MO_SCHLOEGL_MULTI_OFFSET: {
+			//All multivariate 2/3 with offset
+			psi_m = -0.69 - 15.47 * (ta_v - t_surf_v)/(0.5 * (ta_v + t_surf_v)) + 0.0059 * zref * Constants::g/pow(vw,2);
+			psi_s = 6.73 -688.18 * (ta_v - t_surf_v)/(0.5 * (ta_v + t_surf_v)) - 0.0023 * zref * Constants::g/pow(vw,2);
+			return;
+			}
+
+			default:
+			throw InvalidArgumentException("Unsupported atmospheric stability parametrization", AT);
+		}
+	} else { //unstable
+		// Paulson - the original
+		const double dummy1 = pow((1. - 15. * stab_ratio), 0.25);
+		psi_m = 2. * log(0.5 * (1. + dummy1)) + log(0.5 * (1. + Optim::pow2(dummy1)))
+				- 2. * atan(dummy1) + 0.5 * Constants::pi;
+		// Stearns & Weidner, 1993, eq (8) for scalars, note ln x^2 in the paper is ln(x^2) not ln^2(x)
+		const double dummy2 = pow((1. - 22.5 * stab_ratio), 1./3.);
+		psi_s = log(pow(1. + dummy2 + Optim::pow2(dummy2), 1.5)) - 1.732 * atan(0.577 * (1. + 2. * dummy2)) + 0.1659;
+	}
+}
+
+/**
+ * @brief Atmospheric stability correction for wind values.
+ * This makes an iteration to find z0 and ustar at the same time
+ * @param[in] MdataCurrent meteorological data
+ * @param Xdata Snow station data
+ * @param adjust_VW_height if set to false, assumes a constant measurement height for wind values (default: true, ie.
+ * take into account the snow height decreasing the sensor height above the surface)
+ */
+void Meteo::MicroMet(const SnowStation& Xdata, CurrentMeteo &Mdata, const double& roughness_length, const bool& adjust_VW_height) const
+{
+	static const unsigned int max_iter = 100;
+
+	//Adapting the roughness length value depending on the presence or absence of snow
+	Mdata.z0 = ((Xdata.cH - Xdata.Ground) > 0.03)? roughness_length : Xdata.BareSoil_z0;
+
+	// Ideal approximation of pressure and vapor pressure
+	const double p0 = Atmosphere::stdAirPressure(Xdata.meta.position.getAltitude());
+	const double sat_vap = Atmosphere::vaporSaturationPressure(Mdata.ta);
+	const double vw = std::max(0.3, Mdata.vw);
+
+	// Initialize snow surface temperature as well as virtual temperatures for stability
+	const double t_surf = Xdata.Ndata[Xdata.getNumberOfElements()].T;
+	const double ta_v = Mdata.ta * (1. + 0.377 * sat_vap / p0);
+	const double t_surf_v = t_surf * (1. + 0.377 * sat_vap / p0);
+
+	// Adjust for snow height if fixed_height_of_wind=false
+	const double zref = (adjust_VW_height)
+				? std::max(
+					    0.5,
+					    height_of_wind_value - (Xdata.cH - Xdata.Ground + ( (Xdata.findMarkedReferenceLayer() == Constants::undefined) ? (0.) : (Xdata.findMarkedReferenceLayer() - Xdata.Ground) ))
+					  )
+				: height_of_wind_value ;
+	// In case of ventilation ... Wind pumping displacement depth (m)
+	const double d_pump = (SnLaws::wind_pump)? SnLaws::compWindPumpingDisplacement(Xdata) : 0.;
+
+	// Iterate to find atmospheric stability
+	// initial guess (neutral)
+	static const double eps1 = 1.e-3;
+	double psi_m = 0., psi_s = 0.;
+	const double z_ratio = log((zref - d_pump) / Mdata.z0);
+	double ustar_old, ustar = Constants::karman * vw / (z_ratio - psi_m); //at first, psi_m=0
+	unsigned int iter = 0;
+	// Fix the regime once from the (iteration-independent) sign of the virtual temperature difference, rather than
+	// re-deriving it from stab_ratio at each iteration: stab_ratio's denominator (z_ratio - psi_s) can change sign
+	// as psi_s gets updated, which would otherwise make the regime flip-flop between stable and unstable and
+	// prevent the iteration from converging.
+	const int stable = (ta_v >= t_surf_v) ? 1 : -1;
+	do {
+		iter++;
+		ustar_old = ustar;
+
+		// Stability corrections: compute psi_s and psi_m
+		if (stability==RICHARDSON) {
+			RichardsonStability(ta_v, t_surf_v, zref, vw, psi_s, psi_m); //compute ustar & psi_s
+		} else if (!research_mode && (Mdata.tss > 273.) && (Mdata.ta > 277.)) {
+			//force MO_MICHLMAYR for operational mode when temperatures are high enough
+			MOStability(Meteo::MO_MICHLMAYR, ta_v, t_surf_v, t_surf, zref, vw, z_ratio, ustar, psi_s, psi_m, stable);
+		} else {
+			MOStability(stability, ta_v, t_surf_v, t_surf, zref, vw, z_ratio, ustar, psi_s, psi_m, stable);
+		}
+
+		// Both psi_m and psi_s are about to be used as (z_ratio - psi) denominators (for ustar below, and for Tstar
+		// on the next iteration). Across every stability model (including RICHARDSON's own separate formulas),
+		// psi only ever grows large and positive under increasingly unstable conditions; 
+		static const double margin = 0.01; // fraction of z_ratio to keep as a safety buffer
+		const double max_allowed_psi = (1. - margin) * z_ratio;
+		if (psi_m > max_allowed_psi || psi_s > max_allowed_psi) {
+			if (stable < 0) {
+				const double scale = max_allowed_psi / std::max(psi_m, psi_s);
+				psi_m *= scale;
+				psi_s *= scale;
+			} else {
+				psi_m = psi_s = 0.;
+				ustar = Constants::karman * vw / z_ratio;
+				break;
+			}
+		}
+
+		// Update ustar with new psi_m (in case of NEUTRAL, psi_m=0 so it recomputes the exact same value)
+		if (!legacy_stability_bug) ustar = Constants::karman * vw / (z_ratio - psi_m);
+	} while ( (iter<max_iter) && (fabs(ustar_old - ustar) > eps1) );
+
+	if(iter==max_iter) {
+		prn_msg(__FILE__, __LINE__, "wrn", Mdata.date,
+		        "Stability correction did not converge (azi=%.0lf, slope=%.0lf) --> assume neutral",
+		        Xdata.meta.getAzimuth(), Xdata.meta.getSlopeAngle());
+		Mdata.ustar = Constants::karman * vw / z_ratio;
+		Mdata.psi_s = 0.;
+		return;
+	}
+
+	if (legacy_stability_bug) Mdata.ustar = Constants::karman * vw / z_ratio;	//so it get computed at least once!
+
+	// Save the values in the global Mdata data structure to use it later
+	Mdata.ustar = ustar;
+	Mdata.psi_s = psi_s;
+}
+
+/**
+ * @brief Compute atmospheric stability related parameters and if necessary run canopy model
+ * @details
+ * \li with CANOPY set:
+ * 		In case of an existing canopy, call canopy routine, which computes precipitation, radiation,
+ * 		friction velocity and reference temperature for the surface below the canopy.
+ * 		Note that solar radiation may change also in dg_cn_Canopy(). \n
+ * 		- Mdata->iswr  incoming global solar radiation (direct + diffuse), adapted to canopy
+ * 		- Mdata->rswr  reflected global solar radiation (diffuse), adapted to canopy
+ * 		- Mdata->ustar friction velocity, adapted to canopy
+ * 		- Mdata->z0    roughness length, adapted to canopy
+ * 		- Mdata->ea    atmospheric emissivity below canopy, i.e., to give correct
+ * 		               longwave radiation as function of air temperature, however
+ * 		               modified to include effect of canopy
+ * \li without canopy (CANOPY is not set):
+ * 		For bare soil as well as snowed-in canopy or some other problems, compute the roughness
+ * 		length z0, the friction velocity ustar as well as the atmospheric stability correction
+ * 		psi_s for scalar heat fluxes
+ * 		- Mdata->ustar friction velocity
+ * 		- Mdata->z0    roughness length
+ * 		- psi_s        stability correction for scalar heat fluxes
+ * @param Mdata meteorological forcing
+ * @param Xdata snow profile data
+ * @param runCanopyModel should the canopy module also be called?
+ * @param i_adjust_height_of_wind_value should the height of wind values be adjusted?
+ */
+void Meteo::compMeteo(CurrentMeteo &Mdata, SnowStation &Xdata, const bool runCanopyModel,
+                     const bool i_adjust_height_of_wind_value)
+{
+	//Parametrize the roughness_length based on currentMeteo and SnowStation data
+	const double roughness_length = parametrizeSnowZ0(Xdata, Mdata);
+
+	// adjust_height_of_wind_value should be passed externally in order to allow to change it for each
+	// pixel in Alpine3D
+	bool canopy_status = true;
+	if (useCanopyModel && runCanopyModel) {	// The canopy model should not necessarily be called at every call to compMeteo
+		canopy_status = canopy.runCanopyModel(Mdata, Xdata, roughness_length, height_of_wind_value, i_adjust_height_of_wind_value);
+	}
+
+	if (!(useCanopyModel) || canopy_status==false) {
+		MicroMet(Xdata, Mdata, roughness_length, i_adjust_height_of_wind_value);
+	}
+}
+
+/**
+ * @brief Compute atmospheric stability related parameters and if necessary run canopy model
+ * @details
+ * Same as compMeteo(CurrentMeteo &Mdata, SnowStation &Xdata, const bool runCanopyModel, const bool i_adjust_height_of_wind_value)
+ * but adjust_height_of_wind_value is taken from the SnowpackConfig object that has been given to the constructor, so it is
+ * initiallized from the configuration file and configuration defaults.
+ *
+ * @param Mdata meteorological forcing
+ * @param Xdata snow profile data
+ * @param runCanopyModel should the canopy module also be called?
+ */
+void Meteo::compMeteo(CurrentMeteo &Mdata, SnowStation &Xdata, const bool runCanopyModel)
+{
+	//run with the default value as read from the initial cfg file
+	compMeteo(Mdata, Xdata, runCanopyModel, adjust_height_of_wind_value);
+}
