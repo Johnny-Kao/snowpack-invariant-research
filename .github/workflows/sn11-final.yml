@@ -1,0 +1,77 @@
+name: SN-11 native regression and final replay comparison
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned MeteoIO
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake numdiff
+          git clone --no-checkout https://code.wsl.ch/snow-models/meteoio.git /tmp/meteoio
+          git -C /tmp/meteoio checkout --detach 857dd8055861305a20b8bde29914dee7e4c69f2f
+          cd /tmp/meteoio
+          cmake -S . -B . -DDEST=safe -DVERSION_FROM_GIT=ON -DBUILD_TESTING=OFF -DUSE_LTO_OPTIMIZATIONS=OFF -DINSTALL_DOC=OFF -DCPACK_BUNDLE_ALL=ON -DCPACK_GENERATOR=DEB
+          cmake --build . -j2
+          cpack
+          sudo dpkg -i MeteoIO-*.deb
+      - name: Build baseline native app and tests
+        run: |
+          python3 -c 'from pathlib import Path; p=Path("snowpack/Stability.h"); s=p.read_text(); assert s.count("private:")==1; p.write_text(s.replace("private:", "public:", 1))'
+          cmake -S . -B build -DDEST=safe -DVERSION_FROM_GIT=OFF -DBUILD_TESTING=ON -DMETEOIO_INCLUDE_DIR=/usr/include -DMETEOIO_LIBRARY=/usr/lib/libmeteoio.so
+          cmake --build build -j2
+          g++ -std=c++17 -I. research/sn11/native_history_contract.cc -Llib -Wl,-rpath,"$PWD/lib" -lsnowpack -lmeteoio -o /tmp/sn11-history
+          /tmp/sn11-history
+      - name: Baseline native regression suite
+        run: |
+          mkdir -p replay tests/res1exp/output tests/res5exp/output
+          cp -a tests/. build/tests/
+          ln -sfn "$PWD/bin" build/bin
+          ln -sfn "$PWD/tools" build/tools
+          find build/tests -name '*.sh' -exec chmod +x {} +
+          chmod +x tools/*.sh
+          set +e
+          ctest --test-dir build --output-on-failure > replay/ctest-baseline.txt 2>&1
+          echo $? > replay/ctest-baseline.rc
+          set -e
+          cat replay/ctest-baseline.txt
+      - name: Candidate historical traversal contract
+        run: |
+          python3 research/sn11/restore_history.py
+          git diff -- snowpack/Stability.cc
+          cmake --build build -j2
+          /tmp/sn11-history candidate
+      - name: Candidate native regression suite
+        run: |
+          set +e
+          ctest --test-dir build --output-on-failure > replay/ctest-candidate.txt 2>&1
+          echo $? > replay/ctest-candidate.rc
+          set -e
+          cat replay/ctest-candidate.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: sn11-seasonal-replay
+          run-id: 45769545490
+          github-token: ${{ github.token }}
+          path: previous
+      - uses: actions/download-artifact@v4
+        with:
+          name: sn11-history-contract
+          run-id: 45777617780
+          github-token: ${{ github.token }}
+          path: historical
+      - name: Compare historical candidate with original season
+        run: |
+          python3 research/sn11/replay_stats.py previous/res1exp-baseline.csv historical/res1exp-history.csv previous/res5exp-baseline.csv historical/res5exp-history.csv | tee replay/final-summary.txt
+          python3 research/sn11/class_transitions.py previous/res1exp-baseline.csv historical/res1exp-history.csv previous/res5exp-baseline.csv historical/res5exp-history.csv | tee replay/class-transitions.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sn11-final-verification
+          path: replay/
