@@ -260,14 +260,16 @@ void Stability::findWeakLayer(const double& Pk, std::vector<unsigned short>& n_l
 	zwl_d = zwl_n = zwl_ssi = zwl_Sk38 = Xdata.cH;
 
 	// Natural and "deformation rate" Stability Index
-	// Discard Stability::minimum_slab (in m) at surface
+	// Discard Stability::minimum_slab (in m) at surface.
+	// Keep e one past the next element to examine, including the first eligible interface.
 	size_t e = nE;
-	while ((e-- > Xdata.SoilNode) && (((Xdata.cH - (NDS[e+1].z + NDS[e+1].u))/cos_sl) < Stability::minimum_slab)) {};
-	if (e==static_cast<size_t>(-1)) e=0; //HACK: this is ugly: e got corrupted if SoilNode==0
+	while ((e > Xdata.SoilNode+1) && ((Xdata.cH - (NDS[e].z + NDS[e].u))/cos_sl < Stability::minimum_slab)) { --e; }
 
-	if ((e > Xdata.SoilNode) && (e != IOUtils::unodata)) {
+	if (e > Xdata.SoilNode+1) {
 		// Slab must be thicker than Stability::ground_rough (m)  for an avalanche to release.
-		while ((e-- > Xdata.SoilNode) && ((NDS[e+1].z + NDS[e+1].u)/cos_sl > Stability::ground_rough)) {
+		while (e > Xdata.SoilNode) {
+			--e;
+			if (!((NDS[e+1].z + NDS[e+1].u)/cos_sl > Stability::ground_rough)) break;
 			// "deformation rate" Stability Index: find minimum ...
 			if (Swl_d > EMS[e].S_dr || Swl_d == IOUtils::nodata) {
 				Swl_d = EMS[e].S_dr;
@@ -294,13 +296,14 @@ void Stability::findWeakLayer(const double& Pk, std::vector<unsigned short>& n_l
 	if ((Xdata.cH/cos_sl > Stability::ground_rough) && ((Xdata.cH/cos_sl - Pk) > Stability::min_depth_ssi)) {
 		// Discard penetration depth Pk (in m) at surface
 		e = nE;
-		while ((e-- > Xdata.SoilNode) && (((Xdata.cH - (NDS[e+1].z + NDS[e+1].u))/cos_sl) < Pk)) {};
-		if (e==static_cast<size_t>(-1)) e=0; //HACK: this is ugly: e got corrupted if SoilNode==0
+		while ((e > Xdata.SoilNode+1) && ((Xdata.cH - (NDS[e].z + NDS[e].u))/cos_sl < Pk)) { --e; }
 
-		if ((e > Xdata.SoilNode) && (e != IOUtils::unodata)) {
+		if (e > Xdata.SoilNode+1) {
 			// Only down to Pk + Stability::skier_depth (m)
 
-			while ((e-- > Xdata.SoilNode) && (((Xdata.cH - (NDS[e+1].z + NDS[e+1].u))/cos_sl) < (Pk + Stability::skier_depth)) && ((NDS[e+1].z + NDS[e+1].u)/cos_sl > Stability::ground_rough)) {
+			while (e > Xdata.SoilNode) {
+				--e;
+				if (!(((Xdata.cH - (NDS[e+1].z + NDS[e+1].u))/cos_sl < Pk + Stability::skier_depth) && ((NDS[e+1].z + NDS[e+1].u)/cos_sl > Stability::ground_rough))) break;
 				// Skier Stability Index: find minimum OR consider number of structural instabilities in case of near equalities
 
 				if ( (Swl_ssi > NDS[e+1].ssi || Swl_ssi == IOUtils::nodata)
