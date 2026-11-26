@@ -1,0 +1,51 @@
+name: SN-11 Weissfluhjoch seasonal replay
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned MeteoIO
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake numdiff
+          git clone --no-checkout https://code.wsl.ch/snow-models/meteoio.git /tmp/meteoio
+          git -C /tmp/meteoio checkout --detach 857dd8055861305a20b8bde29914dee7e4c69f2f
+          cd /tmp/meteoio
+          cmake -S . -B . -DDEST=safe -DVERSION_FROM_GIT=ON -DBUILD_TESTING=OFF -DUSE_LTO_OPTIMIZATIONS=OFF -DINSTALL_DOC=OFF -DCPACK_BUNDLE_ALL=ON -DCPACK_GENERATOR=DEB
+          cmake --build . -j2
+          cpack
+          sudo dpkg -i MeteoIO-*.deb
+      - name: Build traced native standalone
+        run: |
+          python3 research/sn11/replay_variant.py trace
+          cp snowpack/Stability.cc /tmp/sn11-traced.cc
+          cmake -S . -B build -DDEST=safe -DVERSION_FROM_GIT=OFF -DBUILD_TESTING=ON -DMETEOIO_INCLUDE_DIR=/usr/include -DMETEOIO_LIBRARY=/usr/lib/libmeteoio.so
+          cmake --build build --target snowpack.app -j2
+      - name: Run original selector on official full-season fixtures
+        run: |
+          mkdir -p replay
+          for scenario in res1exp res5exp; do
+            (cd tests/$scenario; mkdir -p output; ../../bin/snowpack -c io_$scenario.ini -e 1996-06-17T00:00) > replay/$scenario-baseline.log 2>&1 || { tail -80 replay/$scenario-baseline.log; exit 1; }
+            grep '^SN11,' replay/$scenario-baseline.log > replay/$scenario-baseline.csv
+          done
+      - name: Run candidate with first eligible interface restored
+        run: |
+          python3 research/sn11/replay_variant.py first
+          cmake --build build --target snowpack.app -j2
+          for scenario in res1exp res5exp; do
+            (cd tests/$scenario; mkdir -p output; ../../bin/snowpack -c io_$scenario.ini -e 1996-06-17T00:00) > replay/$scenario-first.log 2>&1 || { tail -80 replay/$scenario-first.log; exit 1; }
+            grep '^SN11,' replay/$scenario-first.log > replay/$scenario-first.csv
+          done
+      - name: Compare matched profiles and stability classifications
+        run: |
+          python3 research/sn11/replay_stats.py replay/res1exp-baseline.csv replay/res1exp-first.csv replay/res5exp-baseline.csv replay/res5exp-first.csv | tee replay/summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sn11-seasonal-replay
+          path: replay/
