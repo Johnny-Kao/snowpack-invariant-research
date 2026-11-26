@@ -48,7 +48,7 @@ jobs:
           cat replay/red.txt
           test "$rc" -ne 0
           grep -q 'Wrong weak layer:' replay/red.txt
-          ! grep -q 'Invalid weak-layer test profile' replay/red.txt
+          if grep -q 'Invalid weak-layer test profile' replay/red.txt; then exit 1; fi
       - name: Run baseline official suite
         run: |
           set +e
@@ -63,7 +63,8 @@ jobs:
           git restore --source=HEAD -- snowpack/Stability.cc
           cmake --build build -j2
           set -o pipefail
-          ctest --test-dir build -R '^stability.smoke
+          ctest --test-dir build -R '^stability.smoke$' -V | tee replay/green.txt
+          grep -q '0 failures' replay/green.txt
       - name: Run candidate official suite
         run: |
           set +e
@@ -89,31 +90,6 @@ jobs:
           x,y=physical('replay/baseline.txt'),physical('replay/candidate.txt')
           print('Physical diagnostics matched:',len(x), 'of',len(y))
           assert len(x)>30 and x==y, 'physical diagnostic differences'
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: sn11-staging-verification
-          path: replay/
- -V | tee replay/green.txt
-          grep -q '0 failures' replay/green.txt
-      - name: Run candidate official suite
-        run: |
-          set +e
-          ctest --test-dir build -E '^stability.smoke$' --output-on-failure > replay/candidate.txt 2>&1
-          echo $? > replay/candidate.rc
-          set -e
-          tail -25 replay/candidate.txt
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
-          def results(p):
-              return dict(re.findall(r'Test\s+#\d+:\s+(\S+)\s+\.+\s+(Passed|\*\*\*Failed|\*\*\*Not Run|\*\*\*Exception)', Path(p).read_text()))
-          a,b=results('replay/baseline.txt'),results('replay/candidate.txt')
-          print('baseline:',a)
-          print('candidate:',b)
-          assert len(a)==len(b)==9, (a,b)
-          assert all(b[k]=='Passed' for k in a if a[k]=='Passed')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
